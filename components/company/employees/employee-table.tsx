@@ -98,7 +98,11 @@ export default function EmployeeTable({
                 const isSelected = selectedEmployeeId === employee.id;
 
                 return (
-                  <tr key={employee.id} className={isSelected ? "bg-orange-50" : "bg-white"}>
+                  <tr
+                    key={employee.id}
+                    onClick={() => onSelect(employee.id)}
+                    className={`${isSelected ? "bg-orange-50" : "bg-white"} cursor-pointer hover:bg-zinc-50`}
+                  >
                     <td
                       className={`${cellBaseClass()} min-w-[160px] whitespace-nowrap font-semibold text-zinc-900`}
                     >
@@ -123,7 +127,10 @@ export default function EmployeeTable({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => onSelect(employee.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(employee.id);
+                          }}
                           className="inline-flex h-9 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:bg-zinc-50"
                         >
                           수정
@@ -131,7 +138,10 @@ export default function EmployeeTable({
 
                         <button
                           type="button"
-                          onClick={() => onDelete(employee.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(employee.id);
+                          }}
                           disabled={deletingId === employee.id}
                           className="inline-flex h-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 text-sm font-bold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >

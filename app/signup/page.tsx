@@ -28,21 +28,22 @@ export default function SignupPage() {
 
     try {
       if (!name.trim()) {
-        throw new Error("이름을 입력해줘.");
+        throw new Error("이름을 입력해 주세요.");
       }
 
       if (password.length < 6) {
-        throw new Error("비밀번호는 최소 6자 이상이어야 해.");
+        throw new Error("비밀번호는 최소 6자 이상이어야 합니다.");
       }
 
       if (password !== confirmPassword) {
-        throw new Error("비밀번호 확인이 일치하지 않아.");
+        throw new Error("비밀번호 확인이 일치하지 않습니다.");
       }
 
       const trimmedName = name.trim();
+      const trimmedEmail = email.trim();
 
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
@@ -70,23 +71,48 @@ export default function SignupPage() {
         );
 
         if (profileError) {
-          throw profileError;
+          const duplicateIdentityMessage =
+            profileError.message?.includes("duplicate key value") ||
+            profileError.message?.includes("already exists") ||
+            profileError.message?.includes("User already registered");
+
+          if (!duplicateIdentityMessage) {
+            throw profileError;
+          }
         }
       }
 
       if (data.session) {
+        setMessage("회원가입이 완료되었습니다. 잠시 후 이동합니다.");
         router.refresh();
         router.push("/");
         return;
       }
 
       setMessage(
-        "회원가입이 완료됐어. 이메일 인증을 켠 상태라면 메일함에서 인증 후 로그인해줘."
+        "회원가입이 완료되었습니다. 이메일 인증을 사용 중인 경우 메일함에서 인증 후 로그인해 주세요."
       );
+      setName("");
+      setEmail("");
+      setPassword("");
+      setConfirmPassword("");
+      setRole("company");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "회원가입 중 오류가 발생했습니다."
-      );
+      const messageText =
+        error instanceof Error ? error.message : "회원가입 중 오류가 발생했습니다.";
+
+      const alreadyRegistered =
+        messageText.includes("User already registered") ||
+        messageText.includes("already registered") ||
+        messageText.includes("already exists") ||
+        messageText.includes("duplicate key value");
+
+      if (alreadyRegistered) {
+        setMessage("이미 가입된 이메일입니다. 로그인하거나 이메일 인증 여부를 확인해 주세요.");
+        setErrorMessage("");
+      } else {
+        setErrorMessage(messageText);
+      }
     } finally {
       setLoading(false);
     }
@@ -98,7 +124,7 @@ export default function SignupPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-zinc-900">YUL HR 회원가입</h1>
           <p className="mt-2 text-sm text-zinc-600">
-            비밀번호 기반 계정을 먼저 만들고, 필요하면 매직링크 로그인도 함께 사용할 수 있어.
+            비밀번호 기반 계정을 먼저 생성하시고, 필요 시 매직링크 로그인도 함께 이용하실 수 있습니다.
           </p>
         </div>
 
@@ -181,13 +207,13 @@ export default function SignupPage() {
               disabled={loading}
               className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {loading ? "가입 중..." : "회원가입"}
+              {loading ? "가입 중입니다..." : "회원가입"}
             </button>
           </form>
         </section>
 
         <div className="mt-8 text-sm text-zinc-600">
-          이미 계정이 있으면{" "}
+          이미 계정이 있으시면{" "}
           <Link href="/login" className="font-semibold text-zinc-900 underline">
             로그인
           </Link>

@@ -39,6 +39,27 @@ type EmployeeResponse = {
 type ImportResponse = {
   success?: boolean;
   importedCount?: number;
+  insertedEmployeeIds?: string[];
+  uploadedFileName?: string;
+  error?: string;
+};
+
+type LatestImportFileResponse = {
+  success?: boolean;
+  file?: {
+    id: string;
+    fileName: string;
+    storagePath: string;
+    employeeIds: string[];
+    createdAt: string;
+    downloadUrl: string;
+  } | null;
+  error?: string;
+};
+
+type DeleteImportFileResponse = {
+  success?: boolean;
+  deletedEmployeeIds?: string[];
   error?: string;
 };
 
@@ -188,24 +209,52 @@ export default function CompanyEmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingBatch, setDeletingBatch] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [tableOpen, setTableOpen] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState("");
+  const [uploadedFileDownloadUrl, setUploadedFileDownloadUrl] = useState("");
+  const [uploadedEmployeeIds, setUploadedEmployeeIds] = useState<string[]>([]);
 
   useEffect(() => {
-    void loadEmployees();
+    void initializePage();
   }, []);
 
   const editing = useMemo(() => Boolean(form.id), [form.id]);
 
-  async function loadEmployees() {
+  async function initializePage() {
     setLoading(true);
-    const data = await safeJsonFetch<EmployeesResponse>("/api/employees");
-    setEmployees(data?.employees ?? []);
+    await Promise.all([loadEmployees(), loadLatestImportFile()]);
     setLoading(false);
+  }
+
+  async function loadEmployees() {
+    const data = await safeJsonFetch<EmployeesResponse>("/api/employees");
+    const nextEmployees = Array.isArray(data?.employees) ? data.employees : [];
+    setEmployees(nextEmployees);
+    return nextEmployees;
+  }
+
+  async function loadLatestImportFile() {
+    const result = await safeJsonFetch<LatestImportFileResponse>("/api/employees/import", {
+      method: "GET",
+    });
+
+    if (!result || result.error || !result.file) {
+      setUploadedFileName("");
+      setUploadedFileDownloadUrl("");
+      setUploadedEmployeeIds([]);
+      return null;
+    }
+
+    setUploadedFileName(result.file.fileName ?? "");
+    setUploadedFileDownloadUrl(result.file.downloadUrl ?? "");
+    setUploadedEmployeeIds(Array.isArray(result.file.employeeIds) ? result.file.employeeIds : []);
+    return result.file;
   }
 
   function updateForm(next: Partial<EmployeeFormValue>) {
@@ -308,16 +357,50 @@ export default function CompanyEmployeesPage() {
       body: formData,
     });
 
-    if (result?.error) {
+    if (!result) {
+      setErrorMessage("엑셀 업로드 응답을 확인하지 못했습니다. 업로드 API를 점검해 주세요.");
+      setUploading(false);
+      return;
+    }
+
+    if (result.error) {
       setErrorMessage(result.error);
       setUploading(false);
       return;
     }
 
-    await loadEmployees();
-    setSuccessMessage(`${result?.importedCount ?? 0}명의 직원 정보가 업로드되었습니다.`);
-    setUploading(false);
+    if (!result.success) {
+      setErrorMessage("엑셀 업로드에 실패했습니다.");
+      setUploading(false);
+      return;
+    }
+
+    const nextEmployees = await loadEmployees();
+    await loadLatestImportFile();
+
+    const insertedIds = Array.isArray(result.insertedEmployeeIds)
+      ? result.insertedEmployeeIds.filter(Boolean)
+      : [];
+
+    setUploadedEmployeeIds(insertedIds);
     setTableOpen(true);
+    setSuccessMessage(
+      `${result.importedCount ?? insertedIds.length ?? 0}명의 직원 정보가 업로드되었습니다.`
+    );
+
+    if (insertedIds.length > 0) {
+      const firstUploadedId = insertedIds[0];
+      const target = nextEmployees.find((item) => item.id === firstUploadedId);
+
+      if (target) {
+        setForm(employeeToForm(target));
+        setSelectedEmployeeId(firstUploadedId);
+        setFormOpen(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+
+    setUploading(false);
   }
 
   async function handleDownloadTemplate() {
@@ -335,6 +418,17 @@ export default function CompanyEmployeesPage() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadUploadedFile() {
+    if (!uploadedFileDownloadUrl || !uploadedFileName) return;
+
+    const anchor = document.createElement("a");
+    anchor.href = uploadedFileDownloadUrl;
+    anchor.download = uploadedFileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   }
 
   function handleSelectEmployee(id: string) {
@@ -377,6 +471,16 @@ export default function CompanyEmployeesPage() {
       setSelectedEmployeeId("");
     }
 
+    if (uploadedEmployeeIds.includes(id)) {
+      const nextUploadedIds = uploadedEmployeeIds.filter((employeeId) => employeeId !== id);
+      setUploadedEmployeeIds(nextUploadedIds);
+
+      if (nextUploadedIds.length === 0) {
+        setUploadedFileName("");
+        setUploadedFileDownloadUrl("");
+      }
+    }
+
     setSuccessMessage("직원이 삭제되었습니다.");
     setDeletingId("");
   }
@@ -389,6 +493,52 @@ export default function CompanyEmployeesPage() {
   async function handleDeleteSelected() {
     if (!selectedEmployeeId) return;
     await handleDeleteEmployee(selectedEmployeeId);
+  }
+
+  async function handleDeleteUploadedBatch() {
+    if (!uploadedFileName) return;
+
+    const ok = window.confirm("최근 업로드한 파일의 직원 정보를 전체 삭제하시겠습니까?");
+    if (!ok) return;
+
+    setDeletingBatch(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const result = await safeJsonFetch<DeleteImportFileResponse>("/api/employees/import", {
+      method: "DELETE",
+    });
+
+    if (!result) {
+      setErrorMessage("업로드 파일 삭제 응답을 확인하지 못했습니다.");
+      setDeletingBatch(false);
+      return;
+    }
+
+    if (result.error) {
+      setErrorMessage(result.error);
+      setDeletingBatch(false);
+      return;
+    }
+
+    await loadEmployees();
+    await loadLatestImportFile();
+
+    const deletedIds = Array.isArray(result.deletedEmployeeIds)
+      ? result.deletedEmployeeIds
+      : [];
+
+    if (deletedIds.includes(form.id)) {
+      resetForm();
+    }
+
+    if (deletedIds.includes(selectedEmployeeId)) {
+      setSelectedEmployeeId("");
+    }
+
+    setUploadedEmployeeIds([]);
+    setDeletingBatch(false);
+    setSuccessMessage("최근 업로드한 직원 정보가 전체 삭제되었습니다.");
   }
 
   return (
@@ -409,11 +559,18 @@ export default function CompanyEmployeesPage() {
 
           <EmployeeImportCard
             uploading={uploading}
+            deletingBatch={deletingBatch}
             hasSelection={Boolean(selectedEmployeeId)}
+            hasUploadedFile={Boolean(uploadedFileName)}
             onUpload={handleUpload}
             onEditSelected={handleEditSelected}
             onDeleteSelected={handleDeleteSelected}
             onDownloadTemplate={handleDownloadTemplate}
+            uploadedFileName={uploadedFileName}
+            onDownloadUploadedFile={
+              uploadedFileName && uploadedFileDownloadUrl ? handleDownloadUploadedFile : undefined
+            }
+            onDeleteUploadedBatch={handleDeleteUploadedBatch}
           />
 
           <EmployeeFormCard
